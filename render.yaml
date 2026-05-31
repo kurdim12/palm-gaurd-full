@@ -1,0 +1,30 @@
+# Render blueprint for the Palm Guard API.
+# Frontend deploys to Vercel (see packages/web/vercel.json); edge is per-device.
+services:
+  - type: web
+    name: palmguard-api
+    runtime: python
+    rootDir: packages/api
+    buildCommand: pip install -r requirements.txt supabase twilio
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_KEY
+        sync: false
+      - key: STATUS_INFESTED_STREAK
+        value: "3"
+      - key: STATUS_CONFIDENCE_THRESHOLD
+        value: "0.6"
+      - key: ALERT_PROVIDER
+        value: "log"
+      - key: ALERT_RATE_LIMIT_MINUTES
+        value: "60"
+      - key: TWILIO_ACCOUNT_SID
+        sync: false
+      - key: TWILIO_AUTH_TOKEN
+        sync: false
+      - key: TWILIO_FROM
+        sync: false
+      - key: ALERT_TO
+        sync: false
