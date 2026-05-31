@@ -124,5 +124,20 @@ make train && make eval && make export
 - **Arabic-first, bilingual** — RTL default, AR/EN throughout, even alert templates.
 - **Honest data handling** — every clip is kept or counted; nothing dropped silently.
 
+## Limitations & next steps
+
+We'd rather be candid than oversell — here's exactly where it stands:
+
+| Limitation | Status / mitigation |
+|---|---|
+| **Subset, not full corpus** — current model trained on 7 of 35 TreeVibes folders (test = 1 tree/class). | Metrics are *directional*. The ingest/train/eval pipeline is dataset-agnostic and scales to the full ~2,500-clip corpus unchanged — retraining is a one-command rerun. |
+| **Precision 0.595** — recall-first tuning trades false positives for catching infestations. | The status engine's debounce (N consecutive confident hits) absorbs isolated false alarms before they reach a farmer. More training data is the main lever. |
+| **Edge untested on hardware** — runs in `--sim`; not yet on a physical Pi + sensor. | Capture/inference/uploader are unit-tested offline; `docs/HARDWARE.md` documents the Pi setup. Real-hardware validation is the next milestone. |
+| **Alerts/Supabase coded, not live-tested** — Twilio/WhatsApp + Supabase paths exist behind interfaces; the tested path is the in-memory + `log` provider. | Wiring real provider keys is config-only; no code change needed. |
+| **Backbone** — compact from-scratch CNN by default. | A MobileNetV2 transfer-learning backbone is selectable (`PALMGUARD_BACKBONE=mobilenet`) for when more data justifies it. |
+
+**Roadmap:** full-corpus training → on-Pi field validation → live alert provider →
+active-learning loop (retrain on field-confirmed detections).
+
 See [`docs/BUILD_SPEC.md`](docs/BUILD_SPEC.md) for the full rationale and science,
 and [`CLAUDE.md`](CLAUDE.md) for contributor rules.
