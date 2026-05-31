@@ -1,0 +1,10 @@
+# Edge agent. Reuses packages/ml for the feature + inference path (added to
+# sys.path by palmguard_edge.config), so install ml's light deps too:
+#   pip install -r ../ml/requirements.txt
+numpy>=1.24
+scipy>=1.10
+pytest>=7.4
+
+# On the Raspberry Pi only (hardware + slim runtime):
+# sounddevice>=0.4          # contact-sensor capture
+# tflite-runtime>=2.14      # quantised inference without full TensorFlow
