@@ -1,20 +1,26 @@
 """Ingest-adapter unit tests (no network).
 
-Covers the ESC-50 hard-negative logic: insect sounds are excluded, every other
-category becomes a ``clean`` negative, and the site id is the category so the
-site-split groups by sound type.
+Covers:
+* ESC-50 hard-negative logic (insects excluded, rest → clean, site = category).
+* TreeVibes local ingestion from a folder and from a .zip, label + site inference.
+* The combined builder's graceful fallback when nothing is configured.
 """
 
 from __future__ import annotations
 
 import csv
+import zipfile
 from pathlib import Path
 
 import numpy as np
 
 from palmguard_ml import audio_io, config
-from palmguard_ml.ingest import esc50
+from palmguard_ml.ingest import esc50, treevibes
 
+
+# --------------------------------------------------------------------------------------
+# ESC-50
+# --------------------------------------------------------------------------------------
 
 def _make_fake_esc50(root: Path) -> Path:
     """Create a tiny ESC-50-shaped tree: audio/*.wav + meta/esc50.csv."""
@@ -52,11 +58,98 @@ def test_esc50_excludes_insects_and_maps_rest_to_clean(tmp_path, monkeypatch):
     assert {"esc50-dog", "esc50-wind", "esc50-rain"} == {r.site for r in rows}
 
 
-def test_combined_falls_back_to_none_without_urls(monkeypatch):
-    # With no real source URLs, the combined builder produces nothing (caller then
-    # falls back to synthetic).
+# --------------------------------------------------------------------------------------
+# TreeVibes (local path — no network)
+# --------------------------------------------------------------------------------------
+
+def _make_fake_treevibes(root: Path) -> Path:
+    """A small TreeVibes-shaped tree: <class>/<tree>/clip.wav."""
+    layout = {
+        ("infested", "tree_A"): 2,
+        ("infested", "tree_B"): 2,
+        ("clean", "tree_C"): 2,
+        ("healthy", "tree_D"): 2,  # 'healthy' must map to clean too
+    }
+    sig = np.zeros(config.SAMPLE_RATE, dtype=np.float32)
+    for (cls, tree), n in layout.items():
+        for i in range(n):
+            audio_io.write_wav(root / cls / tree / f"rec_{i}.wav", sig)
+    return root
+
+
+def test_treevibes_local_folder_labels_and_sites(tmp_path):
+    extracted = _make_fake_treevibes(tmp_path / "tv")
+    rows = treevibes.build_rows(local=str(extracted), work_dir=tmp_path / "work")
+
+    assert len(rows) == 8
+    labels = {r.site: r.label for r in rows}
+    # 'healthy' folder maps to clean via LABEL_DIR_HINTS.
+    assert set(labels.values()) == {config.LABEL_INFESTED, config.LABEL_CLEAN}
+    # Site ids are per-tree and label-prefixed, so no tree spans classes.
+    assert {r.site for r in rows} == {"in-tree_A", "in-tree_B", "cl-tree_C", "cl-tree_D"}
+    assert all(r.source == "treevibes" for r in rows)
+
+
+def test_treevibes_local_zip_is_extracted(tmp_path):
+    extracted = _make_fake_treevibes(tmp_path / "tv")
+    archive = tmp_path / "treevibes.zip"
+    with zipfile.ZipFile(archive, "w") as zf:
+        for wav in extracted.rglob("*.wav"):
+            zf.write(wav, wav.relative_to(extracted.parent))
+
+    rows = treevibes.build_rows(local=str(archive), work_dir=tmp_path / "work")
+    assert len(rows) == 8
+    assert {r.label for r in rows} == {config.LABEL_INFESTED, config.LABEL_CLEAN}
+
+
+def test_treevibes_missing_local_raises(tmp_path):
+    import pytest
+
+    with pytest.raises(RuntimeError):
+        treevibes.build_rows(local=str(tmp_path / "nope.zip"), work_dir=tmp_path)
+
+
+def test_treevibes_no_source_raises(tmp_path, monkeypatch):
+    import pytest
+
+    monkeypatch.setattr(config, "TREEVIBES_LOCAL", "")
+    monkeypatch.setattr(config, "TREEVIBES_KAGGLE", "")
+    monkeypatch.setattr(config, "TREEVIBES_URL", "")
+    monkeypatch.delenv("TREEVIBES_LOCAL", raising=False)
+    monkeypatch.delenv("TREEVIBES_KAGGLE", raising=False)
+    with pytest.raises(RuntimeError):
+        treevibes.build_rows(work_dir=tmp_path)
+
+
+# --------------------------------------------------------------------------------------
+# Combined builder
+# --------------------------------------------------------------------------------------
+
+def test_combined_falls_back_to_none_without_sources(monkeypatch):
+    # With no real source configured, the combined builder produces nothing
+    # (caller then falls back to synthetic).
     from palmguard_ml import ingest
 
+    monkeypatch.setattr(config, "TREEVIBES_LOCAL", "")
+    monkeypatch.setattr(config, "TREEVIBES_KAGGLE", "")
     monkeypatch.setattr(config, "TREEVIBES_URL", "")
     monkeypatch.setattr(config, "ESC50_URL", "")
     assert ingest.build_combined() is None
+
+
+def test_combined_includes_treevibes_local(tmp_path, monkeypatch):
+    extracted = _make_fake_treevibes(tmp_path / "tv")
+    monkeypatch.setattr(config, "PATHS", config.Paths(root=tmp_path))
+    monkeypatch.setattr(config, "TREEVIBES_LOCAL", str(extracted))
+    monkeypatch.setattr(config, "TREEVIBES_KAGGLE", "")
+    monkeypatch.setattr(config, "TREEVIBES_URL", "")
+    monkeypatch.setattr(config, "ESC50_URL", "")
+
+    from palmguard_ml import ingest
+    from palmguard_ml.manifest import read_manifest
+
+    manifest = ingest.build_combined()
+    assert manifest is not None
+    rows = read_manifest(manifest)
+    assert len(rows) == 8
+    assert {r.source for r in rows} == {"treevibes"}

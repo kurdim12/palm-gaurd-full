@@ -23,20 +23,23 @@ logger = logging.getLogger("palmguard.ingest")
 def build_combined():
     """Build one manifest from whatever real sources are configured.
 
-    Degrades gracefully (SPEC §3): each source is attempted only if its URL is
-    set, and a source that fails to download/parse is logged and skipped rather
-    than aborting the build. Returns the written manifest path, or ``None`` if no
-    real source produced rows (caller should fall back to synthetic).
+    Degrades gracefully (SPEC §3): each source is attempted only if it is
+    configured, and a source that fails to acquire/parse is logged and skipped
+    rather than aborting the build. Returns the written manifest path, or ``None``
+    if no real source produced rows (caller should fall back to synthetic).
     """
     from . import esc50, treevibes
 
+    treevibes_configured = bool(
+        config.TREEVIBES_LOCAL or config.TREEVIBES_KAGGLE or config.TREEVIBES_URL
+    )
     sources = [
-        ("treevibes", config.TREEVIBES_URL, treevibes.build_rows),
-        ("esc50", config.ESC50_URL, esc50.build_rows),
+        ("treevibes", treevibes_configured, treevibes.build_rows),
+        ("esc50", bool(config.ESC50_URL), esc50.build_rows),
     ]
     rows: list[ManifestRow] = []
-    for name, url, builder in sources:
-        if not url:
+    for name, configured, builder in sources:
+        if not configured:
             continue
         try:
             new = builder()

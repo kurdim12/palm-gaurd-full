@@ -90,8 +90,11 @@ TARGET_INFESTED_RECALL: float = 0.9
 # --------------------------------------------------------------------------------------
 
 #: Real dataset sources (BUILD_SPEC §3). Empty => synthetic smoke-test data.
-TREEVIBES_URL: str = os.environ.get("TREEVIBES_URL", "")   # primary RPW corpus
-ESC50_URL: str = os.environ.get("ESC50_URL", "")           # hard negatives -> clean
+#: TreeVibes is on Kaggle (not a plain download); provide ONE of these:
+TREEVIBES_LOCAL: str = os.environ.get("TREEVIBES_LOCAL", "")   # downloaded .zip or folder
+TREEVIBES_KAGGLE: str = os.environ.get("TREEVIBES_KAGGLE", "")  # slug, e.g. potamitis/treevibes
+TREEVIBES_URL: str = os.environ.get("TREEVIBES_URL", "")        # direct archive URL (rare)
+ESC50_URL: str = os.environ.get("ESC50_URL", "")               # hard negatives -> clean
 
 #: Length (s) of each generated synthetic clip (yields several 1 s windows).
 SYNTH_CLIP_SEC: float = 3.0

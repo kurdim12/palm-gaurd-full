@@ -9,3 +9,7 @@ pytest>=7.4
 # Kept commented so the light path installs fast on cheap hardware. Uncomment to
 # train the CNN.
 # tensorflow>=2.15
+
+# Optional: fetch TreeVibes directly from Kaggle (needs credentials). Not required
+# if you use TREEVIBES_LOCAL with an already-downloaded archive/folder.
+# kaggle>=1.6

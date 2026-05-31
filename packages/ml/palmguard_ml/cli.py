@@ -17,7 +17,12 @@ from . import config
 
 
 def _cmd_data(args: argparse.Namespace) -> int:
-    any_real = bool(config.TREEVIBES_URL or config.ESC50_URL)
+    any_real = bool(
+        config.TREEVIBES_LOCAL
+        or config.TREEVIBES_KAGGLE
+        or config.TREEVIBES_URL
+        or config.ESC50_URL
+    )
     path = None
     if any_real:
         from .ingest import build_combined
