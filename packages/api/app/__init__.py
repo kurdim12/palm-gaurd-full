@@ -1,0 +1,1 @@
+"""Palm Guard FastAPI backend."""
