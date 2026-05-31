@@ -127,8 +127,15 @@ manifest is dataset-agnostic. Ingest adapters live in
 - `synthetic.py` — generates RPW-*like* audio (ambient floor + periodic tone-packet
   bursts near 2.25 kHz) so the whole pipeline runs with no download. A fixture,
   not a substitute for real data.
-- `treevibes.py` — downloads/extracts the real TreeVibes RPW corpus and infers
-  label + **site** from folder layout. Enabled by `TREEVIBES_URL`.
+- `treevibes.py` — ingests the real TreeVibes RPW corpus. Labels are
+  **folder-level from the published lists** (infested: folders 1–6,11–23; clean:
+  7,8,9,10,24,25,35), cross-checked against each folder's `AUDIO` value in the
+  annotation CSV (disagreements are counted, never silently resolved); folders
+  outside the lists are labelled from `AUDIO`. **SITE = FOLDER number** (one
+  folder ≈ one tree) — *not* IMEI, since devices were reused across trees. Every
+  clip is accounted for via an `IngestReport` (kept / dropped / disagreements).
+  Source: `TREEVIBES_LOCAL` (downloaded archive or folder), `TREEVIBES_KAGGLE`,
+  or `TREEVIBES_URL`.
 
 Manifest schema (the contract): `path,label,source,site,sample_rate,duration`.
 
