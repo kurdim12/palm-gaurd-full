@@ -46,17 +46,19 @@ def _burst(rng: np.random.Generator, sr: int, peak_hz: float) -> np.ndarray:
     tone = np.sin(2 * np.pi * freq * t) * decay
     # A touch of broadband click at onset.
     tone[: max(1, n // 10)] += rng.standard_normal(max(1, n // 10)) * 0.5
-    return (tone * rng.uniform(0.6, 1.0)).astype(np.float32)
+    return (tone * rng.uniform(1.5, 2.5)).astype(np.float32)
 
 
 def _make_clip(rng: np.random.Generator, infested: bool, colour: float) -> np.ndarray:
     sr = config.SAMPLE_RATE
-    n = int(sr * config.CLIP_DURATION_S)
+    n = int(sr * config.SYNTH_CLIP_SEC)
     sig = _ambient(rng, n, colour)
     if infested:
         pos = 0
         while pos < n:
-            gap = rng.uniform(config.BURST_INTERVAL_MIN_S, config.BURST_INTERVAL_MAX_S)
+            # Dense, capped gaps so every synthetic infested clip is clearly active
+            # (a smoke-test fixture; real burst intervals live in config).
+            gap = rng.uniform(0.05, 0.12)
             pos += int(gap * sr)
             if pos >= n:
                 break
@@ -103,7 +105,7 @@ def build_manifest(
                         source="synthetic",
                         site=site,
                         sample_rate=config.SAMPLE_RATE,
-                        duration=config.CLIP_DURATION_S,
+                        duration=config.SYNTH_CLIP_SEC,
                     )
                 )
 

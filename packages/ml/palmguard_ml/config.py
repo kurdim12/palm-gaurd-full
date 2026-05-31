@@ -1,14 +1,16 @@
 """Central configuration for Palm Guard ML.
 
-**Scientific constants in this module are fixed** (see CLAUDE.md, golden rule #1).
-They derive from the Red Palm Weevil (RPW) bio-acoustics literature: larval feeding
-and locomotion inside the date-palm trunk produce brief, broadband *bursts* whose
-energy concentrates in a band roughly 200 Hz–2.5 kHz with a perceptual peak near
-2.25 kHz. Do not "tune" these to make metrics look better, and never inline these
+**Scientific constants in this module are fixed** (see CLAUDE.md golden rule #1 and
+the authoritative `docs/BUILD_SPEC.md`). RPW larvae produce brief impulsive
+feeding "snaps"; usable energy sits in a mid band ~200–2500 Hz with an emphasis
+near 2250 Hz. Recordings are single-channel at a low rate — **8 kHz is the
+canonical working rate** (matches the TreeVibes corpus; do not resample up).
+Audio is analysed in **1.0 s windows** (0.5 s hop); per-window scores aggregate to
+a clip/tree decision. Never "tune" these to chase metrics, and never inline these
 numbers elsewhere — import them from here.
 
 Everything downstream of the manifest is dataset-agnostic; only paths and the
-optional TreeVibes URL are environment-dependent.
+optional dataset URLs are environment-dependent.
 """
 
 from __future__ import annotations
@@ -18,45 +20,50 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 # --------------------------------------------------------------------------------------
-# Fixed acoustic constants — RPW literature. DO NOT CHANGE to chase metrics.
+# Fixed acoustic constants — authoritative BUILD_SPEC. DO NOT CHANGE to chase metrics.
 # --------------------------------------------------------------------------------------
 
-#: Working sample rate (Hz). Contact-sensor audio is resampled to this everywhere.
+#: Canonical working sample rate (Hz). Matches TreeVibes; resample sources DOWN to this.
 SAMPLE_RATE: int = 8_000
 
-#: Passband for the RPW signal (Hz). Energy outside this band is environmental noise.
+#: Band-pass focus for the RPW signal (Hz). Energy outside is environmental noise.
 BAND_LOW_HZ: int = 200
 BAND_HIGH_HZ: int = 2_500
 
-#: Perceptual / spectral peak of larval bursts (Hz).
+#: Known spectral emphasis of larval feeding (Hz); used in features / sanity checks.
 PEAK_HZ: int = 2_250
+
+#: Classification window (SPEC: CLIP_SECONDS / HOP_SECONDS). The model classifies
+#: one window at a time; window scores aggregate to a file/tree decision.
+WINDOW_SEC: float = 1.0
+HOP_SEC: float = 0.5
+WINDOW_SAMPLES: int = int(SAMPLE_RATE * WINDOW_SEC)   # 8000
+HOP_SAMPLES: int = int(SAMPLE_RATE * HOP_SEC)         # 4000
 
 #: Larval feeding burst structure. Bursts are short transients separated by gaps.
 BURST_MIN_MS: float = 3.0   # shortest credible feeding transient
 BURST_MAX_MS: float = 40.0  # longest credible single burst
 #: Typical inter-burst interval range (s) for an active larva.
 BURST_INTERVAL_MIN_S: float = 0.05
-BURST_INTERVAL_MAX_S: float = 1.5
+BURST_INTERVAL_MAX_S: float = 0.25
 
 # --------------------------------------------------------------------------------------
-# Fixed framing / feature geometry (derived from the constants above).
+# Fixed log-mel / framing geometry (SPEC: N_FFT / HOP_LENGTH / N_MELS / FMIN / FMAX).
 # --------------------------------------------------------------------------------------
 
-#: Canonical analysis clip length (s). Clips are cropped/padded to this.
-CLIP_DURATION_S: float = 2.0
+#: STFT framing *within* a classification window.
+FRAME_LENGTH: int = 1_024
+HOP_LENGTH: int = 256
+N_FFT: int = 1_024
 
-#: STFT framing.
-FRAME_LENGTH: int = 256          # 32 ms @ 8 kHz
-HOP_LENGTH: int = 128            # 16 ms @ 8 kHz, 50% overlap
-N_FFT: int = 256
-
-#: Log-mel spectrogram geometry fed to the CNN.
+#: Log-mel spectrogram geometry fed to the CNN. Mel range (100–3000 Hz) is
+#: intentionally wider than the band-pass so band edges are represented.
 N_MELS: int = 64
-MEL_FMIN_HZ: int = BAND_LOW_HZ
-MEL_FMAX_HZ: int = BAND_HIGH_HZ
+MEL_FMIN_HZ: int = 100
+MEL_FMAX_HZ: int = 3_000
 
-#: Fixed number of time frames the CNN expects (clip cropped/padded to this).
-N_TIME_FRAMES: int = 1 + int((SAMPLE_RATE * CLIP_DURATION_S - FRAME_LENGTH) // HOP_LENGTH)
+#: Number of time frames per window the CNN expects.
+N_TIME_FRAMES: int = 1 + int((WINDOW_SAMPLES - FRAME_LENGTH) // HOP_LENGTH)
 
 # --------------------------------------------------------------------------------------
 # Class labels.
@@ -79,15 +86,19 @@ TARGET_INFESTED_RECALL: float = 0.9
 # Dataset / training (NOT scientific — safe to tune).
 # --------------------------------------------------------------------------------------
 
-#: Set to enable the real TreeVibes ingest path. Empty string => synthetic only.
-TREEVIBES_URL: str = os.environ.get("TREEVIBES_URL", "")
+#: Real dataset sources (BUILD_SPEC §3). Empty => synthetic smoke-test data.
+TREEVIBES_URL: str = os.environ.get("TREEVIBES_URL", "")   # primary RPW corpus
+ESC50_URL: str = os.environ.get("ESC50_URL", "")           # hard negatives -> clean
+
+#: Length (s) of each generated synthetic clip (yields several 1 s windows).
+SYNTH_CLIP_SEC: float = 3.0
 
 #: CNN backbone selector consumed by model.py. Kept here so experiments are explicit.
 CNN_BACKBONE: str = os.environ.get("PALMGUARD_BACKBONE", "small_cnn")
 
 RANDOM_SEED: int = 42
 
-#: Fraction of *sites* (never clips) held out for test.
+#: Fixed fraction of *sites* (never clips/windows) held out for test.
 TEST_SITE_FRACTION: float = 0.3
 
 
@@ -128,6 +139,14 @@ class Paths:
     @property
     def metrics(self) -> Path:
         return self.artifacts_dir / "metrics.json"
+
+    @property
+    def threshold(self) -> Path:
+        return self.artifacts_dir / "threshold.json"
+
+    @property
+    def parity(self) -> Path:
+        return self.artifacts_dir / "parity.json"
 
 
 PATHS = Paths()

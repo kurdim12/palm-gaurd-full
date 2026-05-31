@@ -30,19 +30,27 @@ def _tone(freq: float, n: int, sr: int) -> np.ndarray:
 
 @pytest.fixture
 def clean_clip(rng) -> np.ndarray:
-    """Band-limited noise floor, no bursts."""
-    n = int(config.SAMPLE_RATE * config.CLIP_DURATION_S)
+    """Band-limited noise floor, no bursts (multi-window length)."""
+    n = int(config.SAMPLE_RATE * config.SYNTH_CLIP_SEC)
     return (rng.standard_normal(n).astype(np.float32) * 0.1)
 
 
 @pytest.fixture
 def infested_clip(rng) -> np.ndarray:
-    """Noise floor plus periodic tone bursts near the RPW peak frequency."""
+    """Noise floor plus dense tone bursts near the RPW peak frequency."""
     sr = config.SAMPLE_RATE
-    n = int(sr * config.CLIP_DURATION_S)
+    n = int(sr * config.SYNTH_CLIP_SEC)
     sig = rng.standard_normal(n).astype(np.float32) * 0.1
-    burst_n = int(sr * 0.01)  # 10 ms
-    burst = _tone(config.PEAK_HZ, burst_n, sr) * np.exp(-np.arange(burst_n) / (burst_n / 3))
-    for start in range(0, n - burst_n, int(sr * 0.2)):
+    burst_n = int(sr * 0.02)  # 20 ms bursts
+    burst = 2.0 * _tone(config.PEAK_HZ, burst_n, sr) * np.exp(
+        -np.arange(burst_n) / (burst_n / 3)
+    )
+    for start in range(0, n - burst_n, int(sr * 0.08)):  # every 80 ms
         sig[start : start + burst_n] += burst
     return sig
+
+
+@pytest.fixture
+def clean_window(rng) -> np.ndarray:
+    """A single preprocessed-length clean window."""
+    return rng.standard_normal(config.WINDOW_SAMPLES).astype(np.float32) * 0.1

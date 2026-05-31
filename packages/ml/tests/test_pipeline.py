@@ -30,19 +30,20 @@ def test_synthetic_build_manifest_is_valid(tmp_path, monkeypatch):
 
 def test_baseline_separates_synthetic_classes(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "PATHS", config.Paths(root=tmp_path))
-    synthetic.build_manifest(n_sites_per_class=5, clips_per_site=6, seed=2)
+    synthetic.build_manifest(n_sites_per_class=6, clips_per_site=8, seed=2)
 
     # Import after patching so dataset/baseline see the patched PATHS.
     from palmguard_ml.baseline import train_and_eval
 
     _, metrics = train_and_eval()
-    # Synthetic classes are designed to be separable; baseline should be strong.
-    assert metrics.infested_recall >= 0.8
-    assert metrics.pr_auc >= 0.8
+    # Synthetic classes are designed to be separable; baseline must clear the
+    # spec's recall-first bar on the held-out SITE split.
+    assert metrics.infested_recall >= 0.9
+    assert metrics.pr_auc >= 0.85
 
 
 def test_feature_path_matches_between_calls(infested_clip):
     # Determinism: same input -> identical features (mirror-training guarantee).
-    a = features.features_from_audio(infested_clip)
-    b = features.features_from_audio(infested_clip)
+    a = features.feature_vectors_from_audio(infested_clip)
+    b = features.feature_vectors_from_audio(infested_clip)
     assert np.array_equal(a, b)

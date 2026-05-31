@@ -32,9 +32,9 @@ def normalize_peak(signal: np.ndarray, eps: float = 1e-9) -> np.ndarray:
 
 
 def fix_length(signal: np.ndarray, n_samples: int | None = None) -> np.ndarray:
-    """Crop or zero-pad a signal to exactly ``n_samples`` (default: one clip)."""
+    """Crop or zero-pad a signal to exactly ``n_samples`` (default: one window)."""
     if n_samples is None:
-        n_samples = int(config.SAMPLE_RATE * config.CLIP_DURATION_S)
+        n_samples = config.WINDOW_SAMPLES
     arr = np.asarray(signal, dtype=np.float32)
     if arr.shape[0] >= n_samples:
         return arr[:n_samples]
@@ -44,7 +44,7 @@ def fix_length(signal: np.ndarray, n_samples: int | None = None) -> np.ndarray:
 
 
 def bandpass(signal: np.ndarray, sr: int = config.SAMPLE_RATE) -> np.ndarray:
-    """Zero-phase Butterworth bandpass over the fixed RPW band (200–2500 Hz).
+    """Zero-phase Butterworth bandpass over the fixed band (200–2500 Hz).
 
     Uses the fixed :data:`config.BAND_LOW_HZ` / :data:`config.BAND_HIGH_HZ`.
     """
@@ -59,12 +59,30 @@ def bandpass(signal: np.ndarray, sr: int = config.SAMPLE_RATE) -> np.ndarray:
 
 
 def preprocess(signal: np.ndarray, sr: int = config.SAMPLE_RATE) -> np.ndarray:
-    """Canonical pre-feature pipeline: mono → bandpass → peak-norm → fixed length."""
+    """Canonical pre-feature pipeline on a *whole file* (SPEC §2).
+
+    mono → band-pass (200–2500 Hz) → peak-norm. Length is preserved; windowing
+    into 1 s windows happens afterwards via :func:`windows`.
+    """
     arr = to_mono(signal)
     arr = bandpass(arr, sr)
     arr = normalize_peak(arr)
-    arr = fix_length(arr)
     return arr
+
+
+def windows(signal: np.ndarray) -> np.ndarray:
+    """Slice a preprocessed signal into fixed 1 s windows (0.5 s hop).
+
+    Returns shape ``(n_windows, WINDOW_SAMPLES)``. A signal shorter than one
+    window is zero-padded to a single window so every clip yields ≥ 1 window.
+    """
+    arr = np.asarray(signal, dtype=np.float32)
+    win, hop = config.WINDOW_SAMPLES, config.HOP_SAMPLES
+    if arr.shape[0] < win:
+        return fix_length(arr, win)[np.newaxis, :]
+    n = 1 + (arr.shape[0] - win) // hop
+    idx = np.arange(win)[None, :] + hop * np.arange(n)[:, None]
+    return arr[idx]
 
 
 def frame_signal(
@@ -131,13 +149,14 @@ def mel_filterbank(
 _MEL_FB = mel_filterbank()
 
 
-def log_mel_spectrogram(signal: np.ndarray) -> np.ndarray:
-    """Log-mel spectrogram for the CNN -> shape ``(n_mels, n_time_frames)``.
+def log_mel_spectrogram(window: np.ndarray) -> np.ndarray:
+    """Log-mel spectrogram of one classification window.
 
-    Operates on an *already preprocessed* signal (call :func:`preprocess` first).
-    Padded/cropped to the fixed :data:`config.N_TIME_FRAMES`.
+    Operates on a single preprocessed 1 s window (see :func:`windows`).
+    Returns shape ``(n_mels, n_time_frames)``, padded/cropped to the fixed
+    :data:`config.N_TIME_FRAMES`.
     """
-    power = power_spectrogram(signal)            # (frames, bins)
+    power = power_spectrogram(window)            # (frames, bins)
     mel = power @ _MEL_FB.T                       # (frames, n_mels)
     log_mel = np.log(mel + 1e-6).astype(np.float32)
     log_mel = log_mel.T                           # (n_mels, frames)

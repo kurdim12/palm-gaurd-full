@@ -99,17 +99,17 @@ def _spectral_shape(power: np.ndarray, sr: int) -> tuple[float, float, float]:
     return centroid, bandwidth, flatness
 
 
-def feature_vector(preprocessed: np.ndarray, sr: int = config.SAMPLE_RATE) -> np.ndarray:
-    """Compute the scalar feature vector from a preprocessed signal.
+def feature_vector(window: np.ndarray, sr: int = config.SAMPLE_RATE) -> np.ndarray:
+    """Compute the scalar feature vector for one preprocessed window.
 
     Args:
-        preprocessed: Output of :func:`dsp.preprocess` (mono, banded, fixed-length).
+        window: One window from :func:`dsp.windows` (mono, banded, fixed-length).
         sr: Sample rate (defaults to the fixed working rate).
 
     Returns:
         float32 array aligned with :data:`FEATURE_NAMES`.
     """
-    sig = np.asarray(preprocessed, dtype=np.float32)
+    sig = np.asarray(window, dtype=np.float32)
     rms = float(np.sqrt(np.mean(sig**2) + 1e-12))
     zcr = float(np.mean(np.abs(np.diff(np.sign(sig))) > 0))
 
@@ -144,17 +144,29 @@ def feature_vector(preprocessed: np.ndarray, sr: int = config.SAMPLE_RATE) -> np
     )
 
 
-def cnn_input(preprocessed: np.ndarray) -> np.ndarray:
-    """Log-mel image for the CNN -> shape ``(n_mels, n_time_frames, 1)``."""
-    log_mel = dsp.log_mel_spectrogram(preprocessed)
+def cnn_input(window: np.ndarray) -> np.ndarray:
+    """Log-mel image of one window -> shape ``(n_mels, n_time_frames, 1)``."""
+    log_mel = dsp.log_mel_spectrogram(window)
     return log_mel[..., np.newaxis].astype(np.float32)
 
 
-def features_from_audio(signal: np.ndarray, sr: int = config.SAMPLE_RATE) -> np.ndarray:
-    """Convenience: raw audio -> preprocess -> :func:`feature_vector`."""
-    return feature_vector(dsp.preprocess(signal, sr), sr)
+def feature_vectors_from_audio(
+    signal: np.ndarray, sr: int = config.SAMPLE_RATE
+) -> np.ndarray:
+    """Raw audio -> preprocess -> windows -> per-window feature vectors.
+
+    Returns shape ``(n_windows, n_features)``.
+    """
+    pre = dsp.preprocess(signal, sr)
+    return np.stack([feature_vector(w, sr) for w in dsp.windows(pre)])
 
 
-def cnn_input_from_audio(signal: np.ndarray, sr: int = config.SAMPLE_RATE) -> np.ndarray:
-    """Convenience: raw audio -> preprocess -> :func:`cnn_input`."""
-    return cnn_input(dsp.preprocess(signal, sr))
+def cnn_inputs_from_audio(
+    signal: np.ndarray, sr: int = config.SAMPLE_RATE
+) -> np.ndarray:
+    """Raw audio -> preprocess -> windows -> per-window CNN inputs.
+
+    Returns shape ``(n_windows, n_mels, n_time_frames, 1)``.
+    """
+    pre = dsp.preprocess(signal, sr)
+    return np.stack([cnn_input(w) for w in dsp.windows(pre)])

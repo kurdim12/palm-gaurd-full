@@ -20,7 +20,11 @@ the trunk can pick these up well before visual symptoms. The literature reports:
 - Useful signal energy concentrated roughly in the **0.2–2.5 kHz** band.
 - A perceptual / spectral emphasis near **~2.25 kHz**.
 - Activity organised as **short bursts** (a few ms to a few tens of ms) with
-  variable inter-burst intervals, rather than continuous tones.
+  variable inter-burst intervals (< ~0.25 s), rather than continuous tones.
+- Recordings are single-channel at a low rate; **8 kHz is the canonical working
+  rate** (matches the TreeVibes corpus — resample sources *down* to it, never up).
+- Audio is analysed in **1.0 s windows with 0.5 s hop**; per-window scores are
+  aggregated (max-pool, recall-first) to a clip/tree decision.
 
 These numbers drive the fixed constants in
 `packages/ml/palmguard_ml/config.py`. They are **scientific constants** — not
@@ -51,16 +55,20 @@ training in inference*). The pipeline:
 
 1. **Mono + resample** to 8 kHz.
 2. **Band-pass** (4th-order Butterworth, zero-phase) to 200–2500 Hz to reject
-   out-of-band environmental noise.
-3. **Peak-normalise** and crop/pad to a fixed 2 s analysis clip.
-4. Two representations from the same preprocessed signal:
+   out-of-band environmental noise; peak-normalise.
+3. **Window** into fixed **1.0 s windows, 0.5 s hop** — the classification unit.
+4. Two representations from each window:
    - **Feature vector** (10 interpretable scalars): RMS, ZCR, spectral centroid /
      bandwidth / flatness, in-band energy ratio, peak-band (~2.25 kHz) energy
      ratio, and **burst statistics** (rate, mean/std energy) from short-time
      energy thresholding within the literature burst-length window. Used by the
      classical baseline and cheap on-device sanity checks.
-   - **Log-mel spectrogram** (64 mels bounded to the RPW band × fixed time
-     frames) — the CNN input.
+   - **Log-mel spectrogram** (`n_fft=1024`, `hop=256`, `n_mels=64`, mel range
+     **100–3000 Hz**) — the CNN input.
+
+Window scores aggregate to a file/tree score by **max-pool** (recall-first: a
+tree is as infested as its most infested window), mirrored exactly in training
+(`evaluate.aggregate_to_files`) and inference (`InferenceEngine.predict`).
 
 ## 4. Models
 

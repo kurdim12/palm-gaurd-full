@@ -46,17 +46,24 @@ class InferenceEngine(ABC):
         self.threshold = threshold
 
     @abstractmethod
-    def infested_prob(self, preprocessed: np.ndarray) -> float:
-        """Return P(infested) for a preprocessed signal."""
+    def infested_prob(self, window: np.ndarray) -> float:
+        """Return P(infested) for a single preprocessed 1 s window."""
 
     def predict(self, signal: np.ndarray, sr: int = config.SAMPLE_RATE) -> Prediction:
-        """Classify raw audio (handles preprocessing)."""
-        pre = dsp.preprocess(signal, sr)
-        return self.predict_preprocessed(pre)
+        """Classify raw audio: preprocess → window → aggregate (max-pool).
 
-    def predict_preprocessed(self, preprocessed: np.ndarray) -> Prediction:
-        """Classify an already-preprocessed signal."""
-        p = float(self.infested_prob(preprocessed))
+        Recall-first aggregation: the file is as infested as its most infested
+        window, mirroring training-time file aggregation.
+        """
+        pre = dsp.preprocess(signal, sr)
+        probs = [float(self.infested_prob(w)) for w in dsp.windows(pre)]
+        return self._decide(max(probs) if probs else 0.0)
+
+    def predict_window(self, window: np.ndarray) -> Prediction:
+        """Classify a single already-preprocessed window."""
+        return self._decide(float(self.infested_prob(window)))
+
+    def _decide(self, p: float) -> Prediction:
         if p >= self.threshold:
             return Prediction(config.LABEL_INFESTED, p, p, self.threshold)
         return Prediction(config.LABEL_CLEAN, 1.0 - p, p, self.threshold)

@@ -97,6 +97,38 @@ def best_threshold_for_recall(
     return float(chosen if chosen is not None else best_t)
 
 
+def aggregate_to_files(
+    y_true: np.ndarray,
+    y_score: np.ndarray,
+    files: list[str],
+    how: str = "max",
+) -> tuple[np.ndarray, np.ndarray]:
+    """Aggregate per-window scores to one score+label per source file.
+
+    Recall-first default ``how="max"``: a file is as infested as its most
+    infested window (any confident feeding window flags the tree). A file's true
+    label is the max of its window labels (infested if any window is infested).
+
+    Returns:
+        ``(file_true, file_score)`` arrays, ordered by first appearance.
+    """
+    y_true = np.asarray(y_true, dtype=int)
+    y_score = np.asarray(y_score, dtype=float)
+    order: list[str] = []
+    scores: dict[str, list[float]] = {}
+    labels: dict[str, list[int]] = {}
+    for f, t, s in zip(files, y_true, y_score):
+        if f not in scores:
+            order.append(f)
+            scores[f], labels[f] = [], []
+        scores[f].append(float(s))
+        labels[f].append(int(t))
+    reduce = np.max if how == "max" else np.mean
+    file_true = np.array([int(max(labels[f])) for f in order], dtype=int)
+    file_score = np.array([float(reduce(scores[f])) for f in order], dtype=float)
+    return file_true, file_score
+
+
 def format_report(metrics: Metrics) -> str:
     """Pretty multi-line report for the CLI."""
     cm = metrics.confusion

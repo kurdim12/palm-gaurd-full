@@ -40,7 +40,10 @@ def build_model(seed: int = config.RANDOM_SEED) -> Pipeline:
 
 
 def train_and_eval() -> tuple[Pipeline, Metrics]:
-    """Train the baseline on the site-split train set and evaluate on test.
+    """Train the baseline on window features (site-split) and evaluate per file.
+
+    Trains at the window level, then aggregates window scores to a file/tree
+    decision (max-pool) for recall-first thresholding and reporting.
 
     Returns:
         ``(fitted_pipeline, metrics)``. Persists the model + metrics to artifacts.
@@ -49,13 +52,14 @@ def train_and_eval() -> tuple[Pipeline, Metrics]:
     model = build_model()
     model.fit(train.X_vec, train.y)
 
-    scores = model.predict_proba(test.X_vec)[:, 1]
-    threshold = evaluate.best_threshold_for_recall(test.y, scores)
-    metrics = evaluate.evaluate(test.y, scores, threshold=threshold)
+    window_scores = model.predict_proba(test.X_vec)[:, 1]
+    file_true, file_score = evaluate.aggregate_to_files(test.y, window_scores, test.files)
+    threshold = evaluate.best_threshold_for_recall(file_true, file_score)
+    metrics = evaluate.evaluate(file_true, file_score, threshold=threshold)
 
     config.PATHS.artifacts_dir.mkdir(parents=True, exist_ok=True)
     joblib.dump(model, config.PATHS.baseline_model)
-    payload = {"model": "baseline_rf", **metrics.to_dict()}
+    payload = {"model": "baseline_rf", "level": "file", **metrics.to_dict()}
     config.PATHS.metrics.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     return model, metrics
 

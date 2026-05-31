@@ -17,15 +17,20 @@ from . import config
 
 
 def _cmd_data(args: argparse.Namespace) -> int:
-    if config.TREEVIBES_URL:
-        from .ingest import treevibes
+    any_real = bool(config.TREEVIBES_URL or config.ESC50_URL)
+    path = None
+    if any_real:
+        from .ingest import build_combined
 
-        print(f"Building manifest from TreeVibes: {config.TREEVIBES_URL}")
-        path = treevibes.build_manifest()
-    else:
+        print("Building manifest from configured real sources (graceful fallback)…")
+        path = build_combined()
+    if path is None:
         from .ingest import synthetic
 
-        print("TREEVIBES_URL not set — generating synthetic RPW-like dataset.")
+        if any_real:
+            print("No real source produced data — falling back to synthetic.")
+        else:
+            print("No dataset URLs set — generating synthetic RPW-like dataset.")
         path = synthetic.build_manifest()
 
     from .manifest import read_manifest, summary, validate

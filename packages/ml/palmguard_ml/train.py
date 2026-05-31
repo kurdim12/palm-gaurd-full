@@ -62,9 +62,12 @@ def train(epochs: int = 30, batch_size: int = 32, backbone: str | None = None):
 
 
 def _evaluate(model, test_ds: Dataset):
-    scores = model.predict(test_ds.X_cnn, verbose=0).reshape(-1)
-    threshold = evaluate.best_threshold_for_recall(test_ds.y, scores)
-    return evaluate.evaluate(test_ds.y, scores, threshold=threshold)
+    window_scores = model.predict(test_ds.X_cnn, verbose=0).reshape(-1)
+    file_true, file_score = evaluate.aggregate_to_files(
+        test_ds.y, window_scores, test_ds.files
+    )
+    threshold = evaluate.best_threshold_for_recall(file_true, file_score)
+    return evaluate.evaluate(file_true, file_score, threshold=threshold)
 
 
 def evaluate_saved():
