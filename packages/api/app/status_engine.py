@@ -57,6 +57,9 @@ class StatusEngine:
         # A treated tree stays treated until a confirmed re-infestation.
         if new_streak >= self.streak:
             new_status = TreeStatus.INFESTED
+        elif prev_status == TreeStatus.INFESTED:
+            # Confirmed infestation is sticky: only treatment clears it.
+            new_status = TreeStatus.INFESTED
         elif prev_status == TreeStatus.TREATED:
             new_status = TreeStatus.TREATED
         elif detection.label == Label.CLEAN and new_streak == 0:

@@ -69,6 +69,17 @@ def test_clean_detection_resets_streak():
     assert tree.status == TreeStatus.CLEAN
 
 
+def test_confirmed_infested_is_sticky_until_treated():
+    engine = StatusEngine(streak=3, confidence_threshold=0.6)
+    tree = _tree()
+    for _ in range(3):
+        tree = engine.apply(tree, _detection(Label.INFESTED, 0.9)).tree
+    assert tree.status == TreeStatus.INFESTED
+    # A subsequent low-confidence / clean reading must not silently clear it.
+    tree = engine.apply(tree, _detection(Label.CLEAN, 0.9)).tree
+    assert tree.status == TreeStatus.INFESTED
+
+
 def test_intermittent_noise_does_not_confirm():
     # Alternating confident-infested and clean never reaches the streak.
     engine = StatusEngine(streak=3, confidence_threshold=0.6)
