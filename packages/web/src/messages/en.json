@@ -1,0 +1,49 @@
+{
+  "app": {
+    "title": "Palm Guard",
+    "subtitle": "Acoustic Red Palm Weevil detection",
+    "nav_map": "Map",
+    "nav_alerts": "Alerts",
+    "language": "العربية"
+  },
+  "status": {
+    "clean": "Clean",
+    "suspect": "Suspect",
+    "infested": "Infested",
+    "treated": "Treated",
+    "total": "Total"
+  },
+  "map": {
+    "title": "Farm map",
+    "legend": "Legend",
+    "no_trees": "No trees registered yet"
+  },
+  "tree": {
+    "detail_title": "Tree detail",
+    "status": "Status",
+    "last_detection": "Last detection",
+    "timeline": "Detection timeline",
+    "confidence": "Confidence",
+    "latest_audio": "Latest audio clip",
+    "no_audio": "No audio clip available",
+    "mark_treated": "Mark as treated",
+    "treated_done": "Tree marked as treated",
+    "back": "Back",
+    "not_found": "Tree not found",
+    "infested_streak": "Consecutive infested detections"
+  },
+  "alerts": {
+    "inbox_title": "Alerts inbox",
+    "open_only": "Open only",
+    "acknowledge": "Acknowledge",
+    "acknowledged": "Acknowledged",
+    "empty": "No alerts",
+    "created_at": "Created at",
+    "view_tree": "View tree"
+  },
+  "common": {
+    "loading": "Loading...",
+    "error": "Failed to reach the server",
+    "retry": "Retry"
+  }
+}
