@@ -61,7 +61,7 @@ def detect_bursts(signal: np.ndarray, sr: int = config.SAMPLE_RATE) -> BurstStat
     if energy.size == 0:
         return BurstStats(0.0, 0.0, 0.0, 0)
 
-    med = float(np.median(energy))
+    med = float(np.median(energy)) + 1e-12
     mad = float(np.median(np.abs(energy - med))) + 1e-9
     threshold = med + 3.0 * mad
     active = energy > threshold
@@ -69,6 +69,15 @@ def detect_bursts(signal: np.ndarray, sr: int = config.SAMPLE_RATE) -> BurstStat
     frame_dur_s = fine_hop / sr
     min_frames = max(1, int((config.BURST_MIN_MS / 1000.0) / frame_dur_s))
     max_frames = max(min_frames, int((config.BURST_MAX_MS / 1000.0) / frame_dur_s) + 1)
+    contrast = config.BURST_CONTRAST
+
+    def _emit(start: int, stop: int, out: list[float]) -> None:
+        # Real bursts are short, high-contrast transients: gate on both run length
+        # and peak-to-median energy so band-limited noise doesn't count.
+        seg = energy[start:stop]
+        length = seg.shape[0]
+        if min_frames <= length <= max_frames and float(seg.max()) >= contrast * med:
+            out.append(float(seg.sum()))
 
     bursts: list[float] = []
     run_start: int | None = None
@@ -76,14 +85,10 @@ def detect_bursts(signal: np.ndarray, sr: int = config.SAMPLE_RATE) -> BurstStat
         if on and run_start is None:
             run_start = i
         elif not on and run_start is not None:
-            length = i - run_start
-            if min_frames <= length <= max_frames:
-                bursts.append(float(np.sum(energy[run_start:i])))
+            _emit(run_start, i, bursts)
             run_start = None
     if run_start is not None:
-        length = len(active) - run_start
-        if min_frames <= length <= max_frames:
-            bursts.append(float(np.sum(energy[run_start:])))
+        _emit(run_start, len(active), bursts)
 
     duration_s = signal.shape[0] / sr
     rate = len(bursts) / duration_s if duration_s > 0 else 0.0
