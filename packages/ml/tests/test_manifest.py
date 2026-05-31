@@ -20,7 +20,7 @@ def _row(label: str, site: str) -> ManifestRow:
         source="synthetic",
         site=site,
         sample_rate=config.SAMPLE_RATE,
-        duration=config.CLIP_DURATION_S,
+        duration=config.SYNTH_CLIP_SEC,
     )
 
 

@@ -23,7 +23,7 @@ logger = logging.getLogger("palmguard.ingest")
 def build_combined():
     """Build one manifest from whatever real sources are configured.
 
-    Degrades gracefully (SPEC §0.1): each source is attempted only if its URL is
+    Degrades gracefully (SPEC §3): each source is attempted only if its URL is
     set, and a source that fails to download/parse is logged and skipped rather
     than aborting the build. Returns the written manifest path, or ``None`` if no
     real source produced rows (caller should fall back to synthetic).

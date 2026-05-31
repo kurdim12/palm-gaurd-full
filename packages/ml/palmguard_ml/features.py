@@ -49,8 +49,14 @@ def detect_bursts(signal: np.ndarray, sr: int = config.SAMPLE_RATE) -> BurstStat
     A burst is a contiguous run of frames whose energy exceeds an adaptive
     threshold, with run length inside the literature burst window
     (:data:`config.BURST_MIN_MS`–:data:`config.BURST_MAX_MS`).
+
+    Uses a dedicated *fine* energy frame (~4 ms, 2 ms hop) — independent of the
+    coarse STFT frame used for spectrograms — so feeding transients as short as a
+    few milliseconds are resolvable.
     """
-    frames = dsp.frame_signal(signal)
+    fine_frame = max(8, int(sr * 0.004))   # ~4 ms
+    fine_hop = max(4, int(sr * 0.002))     # ~2 ms
+    frames = dsp.frame_signal(signal, frame_length=fine_frame, hop_length=fine_hop)
     energy = np.mean(frames**2, axis=1)
     if energy.size == 0:
         return BurstStats(0.0, 0.0, 0.0, 0)
@@ -60,7 +66,7 @@ def detect_bursts(signal: np.ndarray, sr: int = config.SAMPLE_RATE) -> BurstStat
     threshold = med + 3.0 * mad
     active = energy > threshold
 
-    frame_dur_s = config.HOP_LENGTH / sr
+    frame_dur_s = fine_hop / sr
     min_frames = max(1, int((config.BURST_MIN_MS / 1000.0) / frame_dur_s))
     max_frames = max(min_frames, int((config.BURST_MAX_MS / 1000.0) / frame_dur_s) + 1)
 

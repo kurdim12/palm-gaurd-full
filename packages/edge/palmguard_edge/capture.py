@@ -15,8 +15,11 @@ import numpy as np
 from palmguard_ml import audio_io, config
 
 
-def record(duration_s: float = config.CLIP_DURATION_S) -> np.ndarray:
+def record(duration_s: float = config.SYNTH_CLIP_SEC) -> np.ndarray:
     """Record ``duration_s`` of mono audio at the fixed sample rate.
+
+    Captures a multi-second clip; 1 s analysis windows are sliced downstream,
+    mirroring training.
 
     Raises:
         RuntimeError: if no audio backend is available (e.g. dev machine).

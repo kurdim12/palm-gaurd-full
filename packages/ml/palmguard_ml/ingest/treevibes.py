@@ -79,18 +79,15 @@ def _site_for(path: Path, label: str) -> str:
     return f"{label[:2]}-{parent}"
 
 
-def build_manifest(url: str | None = None, work_dir: Path | None = None):
-    """Download, extract, and index TreeVibes into a manifest.
+def build_rows(url: str | None = None, work_dir: Path | None = None) -> list[ManifestRow]:
+    """Download, extract, and index TreeVibes into ManifestRows.
 
     Args:
         url: Override for :data:`config.TREEVIBES_URL`.
         work_dir: Where to download/extract (default: ``data/treevibes``).
 
-    Returns:
-        Path to the written manifest.
-
     Raises:
-        RuntimeError: if no URL is configured.
+        RuntimeError: if no URL is configured or no labelled audio is found.
     """
     url = url or config.TREEVIBES_URL
     if not url:
@@ -127,4 +124,9 @@ def build_manifest(url: str | None = None, work_dir: Path | None = None):
             "No labelled audio found in the TreeVibes archive. Check LABEL_DIR_HINTS "
             "against the archive's folder names."
         )
-    return write_manifest(rows)
+    return rows
+
+
+def build_manifest(url: str | None = None, work_dir: Path | None = None):
+    """Build a manifest from TreeVibes alone."""
+    return write_manifest(build_rows(url, work_dir))

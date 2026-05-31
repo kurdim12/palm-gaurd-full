@@ -114,11 +114,22 @@ class TFLiteEngine(InferenceEngine):
 
     @staticmethod
     def _make_interpreter(path: str):
-        try:
-            from tflite_runtime.interpreter import Interpreter  # type: ignore
-        except ImportError:
-            from tensorflow.lite import Interpreter  # noqa: PLC0415
-        return Interpreter(model_path=path)
+        # Prefer the slim Pi runtime; fall back across TF versions (the bundled
+        # interpreter moved out of ``tensorflow.lite`` in TF 2.16+).
+        for loader in (
+            lambda: __import__("tflite_runtime.interpreter", fromlist=["Interpreter"]),
+            lambda: __import__("ai_edge_litert.interpreter", fromlist=["Interpreter"]),
+            lambda: __import__("tensorflow.lite.python.interpreter",
+                               fromlist=["Interpreter"]),
+        ):
+            try:
+                module = loader()
+            except ImportError:
+                continue
+            return module.Interpreter(model_path=path)
+        # Last resort: the public TF alias (older TF only).
+        from tensorflow import lite  # noqa: PLC0415
+        return lite.Interpreter(model_path=path)
 
     def infested_prob(self, preprocessed: np.ndarray) -> float:
         x = features.cnn_input(preprocessed)[np.newaxis, ...].astype(np.float32)
