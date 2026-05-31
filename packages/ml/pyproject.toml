@@ -1,0 +1,19 @@
+[project]
+name = "palmguard-ml"
+version = "0.1.0"
+description = "Acoustic Red Palm Weevil detection — DSP, features, training, export."
+requires-python = ">=3.10"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+
+[tool.black]
+line-length = 100
