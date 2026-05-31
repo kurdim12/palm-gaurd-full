@@ -22,7 +22,6 @@ recording folder so clips from one tree never span the train/test split.
 
 from __future__ import annotations
 
-import os
 import tarfile
 import urllib.request
 import zipfile
@@ -110,8 +109,11 @@ def _resolve_source(
     """Return a folder containing the extracted TreeVibes audio.
 
     Tries local → Kaggle → URL. Raises with actionable guidance if none works.
+    Each source falls back to its ``config`` value (which is read from the
+    environment at import), so ``build_combined`` — which passes no args — honours
+    ``TREEVIBES_LOCAL`` / ``TREEVIBES_KAGGLE`` / ``TREEVIBES_URL`` consistently.
     """
-    local = local or os.environ.get("TREEVIBES_LOCAL", "")
+    local = local or config.TREEVIBES_LOCAL
     if local:
         src = Path(local).expanduser()
         if src.is_dir():
@@ -120,7 +122,7 @@ def _resolve_source(
             return _extract(src, work_dir / "extracted")
         raise RuntimeError(f"TREEVIBES_LOCAL={src} does not exist.")
 
-    kaggle = kaggle or os.environ.get("TREEVIBES_KAGGLE", "")
+    kaggle = kaggle or config.TREEVIBES_KAGGLE
     if kaggle:
         return _download_kaggle(kaggle, work_dir / "extracted")
 
