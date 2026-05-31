@@ -10,42 +10,59 @@ already downloaded. The adapter therefore accepts, in priority order:
 1. ``TREEVIBES_LOCAL`` — a path to an already-downloaded ``.zip`` archive *or* an
    already-extracted folder. The offline-friendly path; no network needed.
 2. ``TREEVIBES_KAGGLE`` — a Kaggle dataset slug (e.g. ``potamitis/treevibes``)
-   fetched via the ``kaggle`` package. Requires Kaggle credentials
-   (``~/.kaggle/kaggle.json`` or ``KAGGLE_USERNAME``/``KAGGLE_KEY``).
+   fetched via the ``kaggle`` package. Requires Kaggle credentials.
 3. ``TREEVIBES_URL`` — a direct archive URL (rare; most mirrors need auth).
 
-The archive layout differs across releases; :data:`LABEL_DIR_HINTS` maps
-folder-name fragments to our two classes. Adjust the hints (not downstream code)
-if a release uses different folder names. The **site** (tree) is inferred from the
-recording folder so clips from one tree never span the train/test split.
+Labelling (authoritative spec)
+-------------------------------
+Labels are **folder-level**, taken from the published folder lists — *not* from
+folder-name string matching and *not* from the CONFIRMATION column:
+
+* INFESTED folders: 1,2,3,4,5,6,11,12,13,14,15,16,17,18,19,20,21,22,23
+* CLEAN folders:    7,8,9,10,24,25,35
+
+The annotation CSV has one row **per folder** with columns
+``FOLDER, IMEI, GPS_LAT, GPS_LONG, VISUAL, AUDIO, CONFIRMATION, COMMENT``. For
+folders in the published lists we cross-check the folder's ``AUDIO`` value
+(1↔infested, 0↔clean) and **count** disagreements rather than silently choosing.
+Folders not in either list (e.g. test folders 26–34) are labelled from their
+``AUDIO`` column. ``SITE`` is the **FOLDER number** (one folder ≈ one tree) — not
+the IMEI, since devices were reused across trees.
+
+Every wav whose folder lacks a CSV row, or whose AUDIO value is unrecognised, is
+**counted and reported** (see :class:`IngestReport`), never dropped silently.
 """
 
 from __future__ import annotations
 
+import csv
+import re
 import tarfile
 import urllib.request
 import zipfile
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from .. import audio_io, config
 from ..manifest import ManifestRow, write_manifest
 
-#: Folder-name fragments → class. Lower-cased substring match.
-LABEL_DIR_HINTS: dict[str, str] = {
-    "infest": config.LABEL_INFESTED,
-    "infected": config.LABEL_INFESTED,
-    "positive": config.LABEL_INFESTED,
-    "rpw": config.LABEL_INFESTED,
-    "clean": config.LABEL_CLEAN,
-    "healthy": config.LABEL_CLEAN,
-    "negative": config.LABEL_CLEAN,
-    "control": config.LABEL_CLEAN,
-}
-
 AUDIO_EXTS = {".wav", ".flac", ".ogg", ".mp3"}
 
 #: Default Kaggle dataset slug for TreeVibes.
 KAGGLE_SLUG = "potamitis/treevibes"
+
+#: Published folder lists (authoritative ground truth).
+INFESTED_FOLDERS: frozenset[int] = frozenset(
+    {1, 2, 3, 4, 5, 6, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23}
+)
+CLEAN_FOLDERS: frozenset[int] = frozenset({7, 8, 9, 10, 24, 25, 35})
+
+#: AUDIO column value -> label (used for cross-check and for unlisted folders).
+_AUDIO_TO_LABEL = {1: config.LABEL_INFESTED, 0: config.LABEL_CLEAN}
+
+#: Canonical CSV column names (case-insensitive match against the real header).
+_COL_FOLDER = "FOLDER"
+_COL_AUDIO = "AUDIO"
 
 
 # --------------------------------------------------------------------------------------
@@ -64,11 +81,7 @@ def _download_url(url: str, dest: Path) -> Path:
 
 
 def _download_kaggle(slug: str, dest_dir: Path) -> Path:
-    """Download + unzip a Kaggle dataset via the official API.
-
-    Requires the ``kaggle`` package and credentials. Returns the folder Kaggle
-    extracted into.
-    """
+    """Download + unzip a Kaggle dataset via the official API."""
     try:
         from kaggle.api.kaggle_api_extended import KaggleApi  # noqa: PLC0415
     except ImportError as exc:
@@ -80,7 +93,7 @@ def _download_kaggle(slug: str, dest_dir: Path) -> Path:
 
     dest_dir.mkdir(parents=True, exist_ok=True)
     api = KaggleApi()
-    api.authenticate()  # reads ~/.kaggle/kaggle.json or KAGGLE_USERNAME/KAGGLE_KEY
+    api.authenticate()
     api.dataset_download_files(slug, path=str(dest_dir), unzip=True, quiet=False)
     return dest_dir
 
@@ -108,10 +121,8 @@ def _resolve_source(
 ) -> Path:
     """Return a folder containing the extracted TreeVibes audio.
 
-    Tries local → Kaggle → URL. Raises with actionable guidance if none works.
-    Each source falls back to its ``config`` value (which is read from the
-    environment at import), so ``build_combined`` — which passes no args — honours
-    ``TREEVIBES_LOCAL`` / ``TREEVIBES_KAGGLE`` / ``TREEVIBES_URL`` consistently.
+    Tries local → Kaggle → URL, each falling back to its ``config`` value so
+    ``build_combined`` (which passes no args) honours the env-driven settings.
     """
     local = local or config.TREEVIBES_LOCAL
     if local:
@@ -139,77 +150,230 @@ def _resolve_source(
 
 
 # --------------------------------------------------------------------------------------
-# Indexing an extracted folder -> ManifestRows.
+# Annotation CSV parsing.
 # --------------------------------------------------------------------------------------
 
-def _label_index(path: Path) -> tuple[str, int] | None:
-    """Return ``(label, index_of_class_folder_in_path.parts)`` or None.
+def _find_annotation_csv(root: Path) -> Path | None:
+    """Locate the annotation CSV under ``root`` (first plausible match)."""
+    candidates = sorted(root.rglob("*.csv"))
+    for csv_path in candidates:
+        try:
+            with csv_path.open(newline="", encoding="utf-8-sig") as fh:
+                header = next(csv.reader(fh), [])
+        except (OSError, StopIteration):
+            continue
+        upper = {h.strip().upper() for h in header}
+        if _COL_FOLDER in upper and _COL_AUDIO in upper:
+            return csv_path
+    return candidates[0] if candidates else None
 
-    Scans ancestors for a class-name fragment (see :data:`LABEL_DIR_HINTS`). The
-    *index* lets :func:`_site_for` identify the per-tree folder just below the
-    class folder, which is the real recording/tree unit in TreeVibes.
+
+def _folder_number(name: str) -> int | None:
+    """Extract the trailing folder number, e.g. 'folder_12' -> 12, '7' -> 7."""
+    m = re.search(r"(\d+)\s*$", str(name))
+    return int(m.group(1)) if m else None
+
+
+@dataclass
+class FolderInfo:
+    """Per-folder annotation joined to the published lists."""
+
+    folder: int
+    audio: int | None          # raw AUDIO column value (None if missing/unparsable)
+    label: str | None          # resolved label, or None if undeterminable
+    list_membership: str | None  # 'infested' | 'clean' | None (unlisted)
+    audio_disagrees: bool      # listed folder whose AUDIO contradicts the list
+
+
+def parse_annotations(csv_path: Path) -> dict[int, FolderInfo]:
+    """Parse the annotation CSV into ``{folder_number: FolderInfo}``.
+
+    Resolution per spec:
+      * Folder in a published list → label from the list; cross-check AUDIO and
+        flag (count) any disagreement, but the list wins.
+      * Folder not in either list → label from AUDIO (1→infested, 0→clean).
+      * Unrecognised/missing AUDIO for an unlisted folder → label None (reported).
     """
-    parts = [p.lower() for p in path.parts]
-    for i, part in enumerate(parts):
-        for hint, label in LABEL_DIR_HINTS.items():
-            if hint in part:
-                return label, i
-    return None
+    with csv_path.open(newline="", encoding="utf-8-sig") as fh:
+        reader = csv.DictReader(fh)
+        # Case-insensitive column lookup.
+        colmap = {(c or "").strip().upper(): c for c in (reader.fieldnames or [])}
+        folder_col = colmap.get(_COL_FOLDER)
+        audio_col = colmap.get(_COL_AUDIO)
+        if folder_col is None:
+            raise ValueError(
+                f"Annotation CSV {csv_path} has no FOLDER column "
+                f"(found: {reader.fieldnames})."
+            )
+
+        infos: dict[int, FolderInfo] = {}
+        for row in reader:
+            folder = _folder_number(row.get(folder_col, ""))
+            if folder is None:
+                continue
+            audio = _parse_int(row.get(audio_col)) if audio_col else None
+
+            if folder in INFESTED_FOLDERS:
+                membership = config.LABEL_INFESTED
+            elif folder in CLEAN_FOLDERS:
+                membership = config.LABEL_CLEAN
+            else:
+                membership = None
+
+            if membership is not None:
+                label = membership
+                disagrees = audio in _AUDIO_TO_LABEL and _AUDIO_TO_LABEL[audio] != membership
+            else:
+                label = _AUDIO_TO_LABEL.get(audio) if audio is not None else None
+                disagrees = False
+
+            infos[folder] = FolderInfo(
+                folder=folder,
+                audio=audio,
+                label=label,
+                list_membership=membership,
+                audio_disagrees=disagrees,
+            )
+    return infos
 
 
-def _label_for(path: Path) -> str | None:
-    """Infer class from any ancestor folder name; None if undetermined."""
-    found = _label_index(path)
-    return found[0] if found else None
+def _parse_int(value) -> int | None:
+    try:
+        return int(str(value).strip())
+    except (TypeError, ValueError):
+        return None
 
 
-def _site_for(path: Path, label: str) -> str:
-    """Infer a stable site/tree id: the first folder *below* the class folder.
+# --------------------------------------------------------------------------------------
+# Indexing extracted audio + annotations -> ManifestRows + a drop report.
+# --------------------------------------------------------------------------------------
 
-    In TreeVibes a tree/recording is the directory directly under ``clean/`` or
-    ``infested/`` (e.g. ``folder_10``); deeper nesting (e.g.
-    ``folder_8/fig1clips.../``) still belongs to that tree, so the whole tree
-    stays on one side of the site-split. Prefixed with the label to keep ids
-    unique across classes. Falls back to the immediate parent if the class folder
-    is the direct parent (no per-tree subfolder).
+@dataclass
+class IngestReport:
+    """Accounting for every wav seen, so nothing is dropped silently."""
+
+    total_wavs: int = 0
+    kept: int = 0
+    dropped_no_csv_row: int = 0
+    dropped_unparsable_folder: int = 0
+    dropped_unrecognized_audio: int = 0
+    audio_list_disagreements: int = 0
+    unlisted_folders_labelled_by_audio: int = 0
+    by_label: dict[str, int] = field(default_factory=dict)
+    sites: set[str] = field(default_factory=set)
+    dropped_examples: list[str] = field(default_factory=list)
+
+    def summary(self) -> dict:
+        return {
+            "total_wavs": self.total_wavs,
+            "kept": self.kept,
+            "by_label": dict(self.by_label),
+            "unique_sites": len(self.sites),
+            "dropped_no_csv_row": self.dropped_no_csv_row,
+            "dropped_unparsable_folder": self.dropped_unparsable_folder,
+            "dropped_unrecognized_audio": self.dropped_unrecognized_audio,
+            "audio_list_disagreements": self.audio_list_disagreements,
+            "unlisted_folders_labelled_by_audio": self.unlisted_folders_labelled_by_audio,
+            "dropped_examples": self.dropped_examples[:10],
+        }
+
+
+def index(extracted: Path, annotations: dict[int, FolderInfo]) -> tuple[list[ManifestRow], IngestReport]:
+    """Join wavs to folder annotations into ManifestRows + an accounting report.
+
+    Pure filesystem + dict logic (no network), so it is unit-testable.
     """
-    found = _label_index(path)
-    if found is not None:
-        _, class_idx = found
-        site_idx = class_idx + 1
-        # parts[site_idx] is the tree folder; parts[-1] is the file itself.
-        if site_idx < len(path.parts) - 1:
-            return f"{label[:2]}-{path.parts[site_idx]}"
-    parent = path.parent.name or "unknown"
-    return f"{label[:2]}-{parent}"
-
-
-def index_folder(extracted: Path) -> list[ManifestRow]:
-    """Walk an extracted TreeVibes folder into ManifestRows.
-
-    Pure filesystem logic (no network), so it is unit-testable against a fixture.
-    """
+    report = IngestReport()
     rows: list[ManifestRow] = []
-    for audio in sorted(extracted.rglob("*")):
-        if not audio.is_file() or audio.suffix.lower() not in AUDIO_EXTS:
+    disagreeing_folders: set[int] = set()
+    audio_labelled_folders: set[int] = set()
+
+    for audio_path in sorted(extracted.rglob("*")):
+        if not audio_path.is_file() or audio_path.suffix.lower() not in AUDIO_EXTS:
             continue
-        label = _label_for(audio)
-        if label is None:
+        report.total_wavs += 1
+
+        folder = _folder_number(audio_path.parent.name)
+        if folder is None:
+            report.dropped_unparsable_folder += 1
+            _note_drop(report, audio_path)
             continue
-        signal, sr = audio_io.read_wav(audio)
+
+        info = annotations.get(folder)
+        if info is None:
+            report.dropped_no_csv_row += 1
+            _note_drop(report, audio_path)
+            continue
+        if info.label is None:
+            report.dropped_unrecognized_audio += 1
+            _note_drop(report, audio_path)
+            continue
+
+        if info.audio_disagrees:
+            disagreeing_folders.add(folder)
+        if info.list_membership is None:
+            audio_labelled_folders.add(folder)
+
+        signal, sr = audio_io.read_wav(audio_path)
+        site = str(folder)  # FOLDER number == site (one folder ~ one tree)
         rows.append(
             ManifestRow(
-                path=str(audio.relative_to(config.PATHS.root))
-                if config.PATHS.root in audio.parents
-                else str(audio),
-                label=label,
+                path=str(audio_path),
+                label=info.label,
                 source="treevibes",
-                site=_site_for(audio, label),
-                sample_rate=sr,
+                site=site,
+                sample_rate=config.SAMPLE_RATE,
                 duration=round(len(signal) / sr, 4),
             )
         )
-    return rows
+        report.kept += 1
+        report.by_label[info.label] = report.by_label.get(info.label, 0) + 1
+        report.sites.add(site)
+
+    # Count folders (not clips) for the structural flags.
+    report.audio_list_disagreements = len(disagreeing_folders)
+    report.unlisted_folders_labelled_by_audio = len(audio_labelled_folders)
+    return rows, report
+
+
+def _note_drop(report: IngestReport, path: Path) -> None:
+    if len(report.dropped_examples) < 10:
+        report.dropped_examples.append(str(path))
+
+
+# --------------------------------------------------------------------------------------
+# Public API.
+# --------------------------------------------------------------------------------------
+
+def build_rows_with_report(
+    url: str | None = None,
+    kaggle: str | None = None,
+    local: str | None = None,
+    work_dir: Path | None = None,
+    csv_path: Path | None = None,
+) -> tuple[list[ManifestRow], IngestReport]:
+    """Acquire + index TreeVibes into ManifestRows, returning the drop report too.
+
+    Raises:
+        RuntimeError: no source configured, no annotation CSV, or zero labelled clips.
+    """
+    work_dir = work_dir or (config.PATHS.data_dir / "treevibes")
+    extracted = _resolve_source(url, kaggle, local, work_dir)
+
+    csv_path = csv_path or _find_annotation_csv(extracted)
+    if csv_path is None:
+        raise RuntimeError(
+            f"No annotation CSV found under {extracted}. TreeVibes ingest is "
+            "CSV-driven (columns FOLDER, IMEI, ..., AUDIO, ...); include it."
+        )
+    annotations = parse_annotations(csv_path)
+    rows, report = index(extracted, annotations)
+    if not rows:
+        raise RuntimeError(
+            f"No labelled audio produced from {extracted} using {csv_path.name}. "
+            f"Report: {report.summary()}"
+        )
+    return rows, report
 
 
 def build_rows(
@@ -217,20 +381,10 @@ def build_rows(
     kaggle: str | None = None,
     local: str | None = None,
     work_dir: Path | None = None,
+    csv_path: Path | None = None,
 ) -> list[ManifestRow]:
-    """Acquire (local/Kaggle/URL), extract, and index TreeVibes into ManifestRows.
-
-    Raises:
-        RuntimeError: if no source is configured or no labelled audio is found.
-    """
-    work_dir = work_dir or (config.PATHS.data_dir / "treevibes")
-    extracted = _resolve_source(url, kaggle, local, work_dir)
-    rows = index_folder(extracted)
-    if not rows:
-        raise RuntimeError(
-            "No labelled audio found in the TreeVibes source. Check LABEL_DIR_HINTS "
-            "against the archive's folder names, or that the path is correct."
-        )
+    """Acquire + index TreeVibes into ManifestRows (drop report discarded)."""
+    rows, _ = build_rows_with_report(url, kaggle, local, work_dir, csv_path)
     return rows
 
 
@@ -239,6 +393,8 @@ def build_manifest(
     kaggle: str | None = None,
     local: str | None = None,
     work_dir: Path | None = None,
+    csv_path: Path | None = None,
 ):
     """Build a manifest from TreeVibes alone."""
-    return write_manifest(build_rows(url, kaggle, local, work_dir))
+    rows, _ = build_rows_with_report(url, kaggle, local, work_dir, csv_path)
+    return write_manifest(rows)
