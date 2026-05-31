@@ -37,6 +37,22 @@ infested `[2, 25]` — caught 25 of 27 infested clips.
 **TFLite parity:** mean |Δ| = **0.025** (tolerance 0.05) over 7098 windows →
 PASSED. The quantised edge model faithfully reproduces the float model.
 
+## Backbone ablation (why `small_cnn`)
+
+We compared the compact from-scratch CNN against a MobileNetV2 transfer-learning
+backbone on the *same* data and site-split:
+
+| Backbone | PR-AUC | Precision | Accuracy | Note |
+|---|:---:|:---:|:---:|---|
+| **`small_cnn`** (shipped) | **0.921** | **0.595** | **0.896** | — |
+| `mobilenet` | 0.142 | 0.148 | 0.148 | collapsed → predicts all-infested |
+
+MobileNetV2 collapsed to the majority-positive shortcut (PR-AUC ≈ base rate): it's
+an ImageNet-scale model trained from random init (pretrained weights unavailable
+offline) on only ~5 training trees — far too little data. The lean `small_cnn` is
+both more accurate **and** edge-appropriate (40 KB quantised). With the full
+corpus, the MobileNet path is worth revisiting with pretrained weights.
+
 > Caveat: this is a 7-folder subset of the 35-folder corpus, so the test set is
 > ~1 tree per class. Numbers are strong but directional; train on more folders
 > for statistically robust figures. Reproduce with:
