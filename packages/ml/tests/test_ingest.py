@@ -90,6 +90,38 @@ def test_treevibes_local_folder_labels_and_sites(tmp_path):
     assert all(r.source == "treevibes" for r in rows)
 
 
+def test_treevibes_real_layout_nesting_and_unlabeled(tmp_path):
+    """Mirror the real TreeVibes tree: nested class dirs, per-tree subfolders that
+    nest deeper, and an unlabeled test/ folder that must be skipped."""
+    root = tmp_path / "tv"
+    sig = np.zeros(config.SAMPLE_RATE, dtype=np.float32)
+    paths = [
+        "field/field/train/clean/folder_10/a.wav",
+        "field/field/train/clean/folder_8/fig1clips_x/c.wav",   # deeper nesting
+        "field/field/train/clean/folder_8/fig2_clips_y/d.wav",  # same tree, deeper
+        "field/field/train/clean/folder_9/folder_9/e.wav",      # double-nested
+        "field/field/train/infested/folder_1/f.wav",
+        "field/field/train/infested/folder_2/g.wav",
+        "field/field/test/folder_26/h.wav",          # unlabeled -> skipped
+        "field/field/test/difficult_cases/i.wav",    # unlabeled -> skipped
+    ]
+    for p in paths:
+        audio_io.write_wav(root / p, sig)
+
+    rows = treevibes.build_rows(local=str(root), work_dir=tmp_path / "work")
+
+    # The two test/ clips have no clean|infested ancestor -> skipped.
+    assert len(rows) == 6
+    # folder_8's two deeply-nested clips collapse to a single tree/site.
+    f8 = {r.site for r in rows if "folder_8" in r.path}
+    assert f8 == {"cl-folder_8"}
+    # Site = the folder directly under the class dir (the tree), not deeper dirs.
+    assert {r.site for r in rows} == {
+        "cl-folder_10", "cl-folder_8", "cl-folder_9",
+        "in-folder_1", "in-folder_2",
+    }
+
+
 def test_treevibes_local_zip_is_extracted(tmp_path):
     extracted = _make_fake_treevibes(tmp_path / "tv")
     archive = tmp_path / "treevibes.zip"

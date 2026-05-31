@@ -142,21 +142,44 @@ def _resolve_source(
 # Indexing an extracted folder -> ManifestRows.
 # --------------------------------------------------------------------------------------
 
-def _label_for(path: Path) -> str | None:
-    """Infer class from any ancestor folder name; None if undetermined."""
-    for part in (p.lower() for p in path.parts):
+def _label_index(path: Path) -> tuple[str, int] | None:
+    """Return ``(label, index_of_class_folder_in_path.parts)`` or None.
+
+    Scans ancestors for a class-name fragment (see :data:`LABEL_DIR_HINTS`). The
+    *index* lets :func:`_site_for` identify the per-tree folder just below the
+    class folder, which is the real recording/tree unit in TreeVibes.
+    """
+    parts = [p.lower() for p in path.parts]
+    for i, part in enumerate(parts):
         for hint, label in LABEL_DIR_HINTS.items():
             if hint in part:
-                return label
+                return label, i
     return None
 
 
-def _site_for(path: Path, label: str) -> str:
-    """Infer a stable site/tree id from the recording folder.
+def _label_for(path: Path) -> str | None:
+    """Infer class from any ancestor folder name; None if undetermined."""
+    found = _label_index(path)
+    return found[0] if found else None
 
-    Uses the immediate parent directory (the per-tree recording folder), prefixed
-    with the label to keep ids unique across classes.
+
+def _site_for(path: Path, label: str) -> str:
+    """Infer a stable site/tree id: the first folder *below* the class folder.
+
+    In TreeVibes a tree/recording is the directory directly under ``clean/`` or
+    ``infested/`` (e.g. ``folder_10``); deeper nesting (e.g.
+    ``folder_8/fig1clips.../``) still belongs to that tree, so the whole tree
+    stays on one side of the site-split. Prefixed with the label to keep ids
+    unique across classes. Falls back to the immediate parent if the class folder
+    is the direct parent (no per-tree subfolder).
     """
+    found = _label_index(path)
+    if found is not None:
+        _, class_idx = found
+        site_idx = class_idx + 1
+        # parts[site_idx] is the tree folder; parts[-1] is the file itself.
+        if site_idx < len(path.parts) - 1:
+            return f"{label[:2]}-{path.parts[site_idx]}"
     parent = path.parent.name or "unknown"
     return f"{label[:2]}-{parent}"
 
