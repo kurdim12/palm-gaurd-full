@@ -46,6 +46,9 @@ BURST_MAX_MS: float = 40.0  # longest credible single burst
 #: Typical inter-burst interval range (s) for an active larva.
 BURST_INTERVAL_MIN_S: float = 0.05
 BURST_INTERVAL_MAX_S: float = 0.25
+#: Min peak-frame-energy / median-energy ratio for a run to count as a burst.
+#: Impulsive feeding transients clear this; band-limited noise does not.
+BURST_CONTRAST: float = 10.0
 
 # --------------------------------------------------------------------------------------
 # Fixed log-mel / framing geometry (SPEC: N_FFT / HOP_LENGTH / N_MELS / FMIN / FMAX).
